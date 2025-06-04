@@ -1,0 +1,133 @@
+---
+title: "MERMAID Image Classification Results"
+subtitle: "Visualizations for UNOC"
+author: "Iain R. Caldwell"
+date: 06/03/2025
+format: 
+  html: #for website
+    embed-resources: true
+editor: visual
+code-fold: true
+code-summary: "Show the code"
+toc: true
+title-block-banner: "#f0f3f5"
+title-block-banner-color: "black"
+include-after-body: "footer.html"
+---
+
+## Context - Visualizing MERMAID image classification performance
+
+This code visualizes model performance results from the MERMAID image classification model.
+
+## Loading package libraries and setting parameters
+
+The following libraries and parameters are used throughout the code.
+
+```{r}
+#| label: Load package libraries and set parameters
+#| warning: false
+rm(list = ls()) #remove past stored objects
+options(scipen = 999) #turn off scientific notation
+
+#Package libraries
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(mermaidr)
+library(ggtext)
+library(xfun)
+```
+
+## Loading results files
+
+mermaid_get_reference(reference = "benthicattributes")
+
+```{r}
+#| label: Load data
+### Report with the overall performance
+overallClassReportTBL <- 
+  read_excel(path = "../data/classifier_metrics.xlsx",
+             sheet = "Metrics")
+
+### Report with the performance per label (UUIDs)
+labelClassReportTBL <-
+  read_excel(path = "../data/classifier_metrics.xlsx",
+             sheet = "Classification_Report")
+
+### Label mapping --> UUID to character
+labelMapTBL <- read_csv(file = "../data/LabelMap.csv")
+```
+
+## Prepare data
+
+```{r}
+#| label: Prepare data
+overallClassReportTBL <- overallClassReportTBL %>% 
+  filter(...1 %in% c("precision", "recall", "f1_score")) %>% 
+  pivot_wider(names_from = ...1,
+              values_from = `0.0`) %>% 
+  mutate(CoralFocus3Label = "<b>Overall</b>") %>% 
+  rename(`f1-score` = f1_score)
+
+labelClassReportTBL <- labelClassReportTBL %>% 
+  rename(label_id = ...1) %>% 
+  filter(!label_id %in% c("accuracy", "weighted avg", "macro avg")) %>% 
+  left_join(labelMapTBL, by = "label_id") %>% 
+  select(CoralFocus3Label, `f1-score`, precision, recall)
+
+allClassReportTBL <- bind_rows(labelClassReportTBL, overallClassReportTBL) 
+
+```
+
+## Plot the results - horizontal barplot by label
+
+```{r}
+#| label: Horizonal barplot by label
+#| fig-height: 10
+#| fig-width: 10
+
+# Reshape data for faceted plotting
+longAllClassReportTBL <- allClassReportTBL %>%
+  pivot_longer(cols = c(precision, recall, `f1-score`),
+               names_to = "Metric", values_to = "Score") %>% 
+  mutate(Group = ifelse(CoralFocus3Label == "<b>Overall</b>", "Overall", "Label"))
+
+# Order labels by F1-score 
+label_order <- labelClassReportTBL %>%
+  arrange(`f1-score`) %>%
+  pull(CoralFocus3Label)
+
+longAllClassReportTBL <- longAllClassReportTBL %>%
+  mutate(CoralFocus3Label = factor(CoralFocus3Label,
+                                   levels = c(label_order, "<b>Overall</b>")),
+         Metric = factor(Metric, levels = c("f1-score", "precision", "recall")),
+         Group = factor(Group, levels = c("Overall", "Label")))
+
+# Create the plot
+ggplot(longAllClassReportTBL,
+       aes(x = Score, y = CoralFocus3Label, fill = Score)) +
+  facet_grid(Group ~ Metric, scales = "free_y", space = "free_y") +
+  geom_col(alpha = 0.75) +
+  geom_vline(xintercept = c(0, 0.25, 0.5, 0.75, 1), linetype = "dotted") +
+  scale_fill_viridis_c(option = "D", direction = -1) +
+  scale_x_continuous(breaks = c(0, 0.25, 0.5, 0.75, 1),
+                     labels = c(0, 0.25, 0.5, 0.75, 1)) +
+  labs(x = "Score",
+       y = NULL,
+       title = "MERMAID Classification Model Performance",
+       subtitle = "Overall results and by label") +
+  theme_minimal(base_size = 14) +
+  theme(
+    strip.text = element_text(face = "bold", size = 14),
+    strip.text.y.right = element_blank(),
+    axis.text.x = element_text(size = 10),
+    axis.ticks.x = element_line(),
+    axis.title.x = element_text(size = 12, face = "bold", margin = margin(t = 10)),
+    axis.text.y = element_markdown(size = 10),
+    panel.spacing.x = unit(0.75, "lines"),
+    legend.position = "none"
+  )
+
+
+
+```
