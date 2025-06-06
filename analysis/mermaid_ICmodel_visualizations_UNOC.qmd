@@ -36,6 +36,8 @@ library(ggplot2)
 library(mermaidr)
 library(ggtext)
 library(xfun)
+library(plotly) #for turning the confusion matrices into interactive plots
+library(htmlwidgets) #saving interactive plots as html files
 ```
 
 ## Loading results files
@@ -60,6 +62,9 @@ labelMapTBL <- read_csv(file = "../data/LabelMap.csv")
 benthicAttTBL <- mermaid_get_reference(reference = "benthicattributes") %>% 
   select(name, parent) %>% 
   rename(ba = name)
+
+### User testing results (for confusion matrices)
+userResTBL <- read_csv(file = "../data/anonymizedUserTestingResults.csv")
 
 ```
 
@@ -129,12 +134,19 @@ f1ScoreByTlcTBL <- labelClassReportTBL %>%
 
 allClassReportTBL <- bind_rows(labelClassReportTBL, overallClassReportTBL) 
 
+### Add an asterisk to all the user labels that are not represented in the model
+userResTBL <- userResTBL %>% 
+  mutate(ba_user = ifelse(ba_user %in% labelClassReportTBL$ba,
+                          as.character(ba_user),
+                          paste0(ba_user, "*")))
 ```
 
 ## Plot the results - horizontal barplots by label
 
+### Horizontal barplot with color gradient
+
 ```{r}
-#| label: Horizonal barplot by label
+#| label: Horizonal barplot with color gradient
 #| fig-height: 10
 #| fig-width: 10
 
@@ -172,7 +184,7 @@ ggplot(longAllClassReportTBL,
        y = NULL,
        title = "MERMAID Classification Model Performance",
        subtitle = "Overall results and by label") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 12) +
   theme(
     strip.text = element_text(face = "bold", size = 14),
     strip.text.y.right = element_blank(),
@@ -183,6 +195,14 @@ ggplot(longAllClassReportTBL,
     panel.spacing.x = unit(0.75, "lines"),
     legend.position = "none"
   )
+```
+
+### Horizontal barplot with labels organized into top level categories
+
+```{r}
+#| label: Horizonal barplot organized into top level categories
+#| fig-height: 11
+#| fig-width: 10
 
 tlcColors <- c(Overall = "black",
                `Hard coral` = "#498FC9",
@@ -224,7 +244,7 @@ ggplot(longAllClassReportTBL,
        y = NULL,
        title = "MERMAID Classification Model Performance",
        subtitle = "Overall results and by label") +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 12) +
   theme(
     strip.text = element_text(face = "bold", size = 12),
     #strip.text.y.right = element_blank(),
@@ -236,4 +256,118 @@ ggplot(longAllClassReportTBL,
     panel.spacing.x = unit(0.25, "lines"),
     legend.position = "none"
   )
+```
+
+## Plot user data vs. model - confusion matrices
+
+Confusion matrices are a visualized representation of the how frequently the model and users assign the same or different labels to points on images. Cells along the diagonal indicate agreement and off the diagonal indicate disagreement between the model assignment and users.
+
+### Confusion matrix with all labels
+
+This confusion matrix includes all labels assigned by the model or users. The labels with asterisks were assigned by users but were not included in the model, so could not have been assigned as such.
+
+```{r}
+#| label: Confusion matrix with all labels
+#| fig-height: 12
+#| fig-width: 12
+## Note - this uses the best model guess with no score cutoff
+# Get all unique labels and sort them alphabetically
+all_labels <- sort(union(
+  unique(userResTBL$ba_user),
+  unique(userResTBL$ba_classifier)
+))
+
+# Ensure all levels are included and ordered alphabetically
+confusion_matrix <- userResTBL %>%
+  mutate(
+    ba_user = factor(ba_user, levels = all_labels),
+    ba_classifier = factor(ba_classifier, levels = all_labels)
+  ) %>%
+  count(ba_user, ba_classifier, .drop = FALSE)
+
+# Create the ggplot heatmap
+topClassAllLabelsConfusionHeatmap <- ggplot(confusion_matrix,
+                                         aes(x = ba_classifier,
+                                             y = ba_user,
+                                             fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(colors = c("white", "#6baed6", "#08306b"),
+                       name = "Count") +
+  labs(title = "Confusion Matrix: User vs. Classifier (all labels)",
+       x = "Classifier Labels",
+       y = "User Labels") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        axis.text.y = element_text(size = 8),
+        plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        legend.position = "right")
+
+#topClassAllLabelsConfusionHeatmap
+
+#ggsave(plot = topClassAllLabelsConfusionHeatmap,
+#       filename = "../plots/TopClassAllLabelsConfusionHeatmap.jpg",
+#       width = 11,
+#       height = 8)
+
+# Convert to interactive plot using plotly
+topClassAllLabelsConfusionInteractivePlot <-
+  ggplotly(topClassAllLabelsConfusionHeatmap, tooltip = c("x", "y", "fill"))
+
+# # Save the interactive plot as an HTML file
+# saveWidget(topClassAllLabelsConfusionInteractivePlot,
+#            "../plots/TopClassAllLabelsConfusionHeatmap.html",
+#            selfcontained = TRUE)
+
+topClassAllLabelsConfusionInteractivePlot
+```
+
+### Confusion matrix with labels grouped by top level category
+
+These plots show agreement/disagreement at a higher taxonomic level, where each label is aggregated to one of 11 top level categories.
+
+```{r}
+#| label: Confusion matrix with top level categories
+#### Create another confusion matrix with only the TLCs ####
+# Get all unique labels and sort them alphabetically
+tlc_labels <- sort(union(unique(userResTBL$tlc_user),
+                         unique(userResTBL$tlc_classifier)))
+
+# Ensure all levels are included and ordered alphabetically
+tlc_confusion_matrix <- userResTBL %>%
+  mutate(tlc_user = factor(tlc_user, levels = tlc_labels),
+         tlc_classifier = factor(tlc_classifier, levels = tlc_labels)) %>%
+  count(tlc_user, tlc_classifier, .drop = FALSE)
+
+# Create the ggplot heatmap
+topClassTlcConfusionHeatmap <- ggplot(tlc_confusion_matrix,
+                                      aes(x = tlc_classifier,
+                                          y = tlc_user,
+                                          fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(colors = c("white", "#6baed6", "#08306b"),
+                       name = "Count") +
+  labs(title = "Confusion Matrix: User vs. Classifier (top-level caegories)",
+       x = "Classifier Labels",
+       y = "User Labels") +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5, size = 16, face = "bold"),
+        legend.position = "right")
+
+# topClassTlcConfusionHeatmap
+# 
+# ggsave(plot = topClassTlcConfusionHeatmap,
+#        filename = "../plots/TopClassTlcConfusionHeatmap.jpg",
+#        width = 10)
+
+# Convert to interactive plot using plotly
+topClassTlcConfusionInteractivePlot <-
+  ggplotly(topClassTlcConfusionHeatmap, tooltip = c("x", "y", "fill"))
+
+# # Save the interactive plot as an HTML file
+# saveWidget(topClassTlcConfusionInteractivePlot,
+#            "../plots/TopClassTlcConfusionHeatmap.html",
+#            selfcontained = TRUE)
+
+topClassTlcConfusionInteractivePlot
 ```
